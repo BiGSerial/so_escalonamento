@@ -1,7 +1,8 @@
+# simulador_p1.py
+
 import os
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from pprint import pprint
 
 
 # ========== PARSE DE ENTRADA ==========
@@ -11,7 +12,6 @@ def parse_input(input_path):
 
     n = int(lines[0])
     processes = []
-
     for line in lines[1 : n + 1]:
         name, arrival, duration, priority = line.split()
         processes.append(
@@ -31,20 +31,14 @@ def parse_input(input_path):
 # ========== FCFS ==========
 def fcfs_scheduler(processes):
     processes.sort(key=lambda x: x["arrival"])
-    process_new = []
-    start = 0
+    schedule = []
+    time = 0
     for p in processes:
-        if p["arrival"] > start:
-            start = p["arrival"]
-        process_new.append(
-            {
-                "name": p["name"],
-                "start": start,
-                "end": start + p["duration"],
-            }
-        )
-        start += p["duration"]
-    return process_new
+        if time < p["arrival"]:
+            time = p["arrival"]
+        schedule.append({"name": p["name"], "start": time, "end": time + p["duration"]})
+        time += p["duration"]
+    return schedule
 
 
 # ========== SJF NÃO PREEMPTIVO ==========
@@ -52,14 +46,14 @@ def sjf_non_preemptive_scheduler(processes):
     clock = 0
     ready_queue = []
     completed = []
-    processes = sorted(processes, key=lambda x: x["arrival"])
-    waiting = processes.copy()
+    waiting = sorted(processes, key=lambda x: x["arrival"])
 
     while waiting or ready_queue:
         ready_queue += [p for p in waiting if p["arrival"] <= clock]
         waiting = [p for p in waiting if p["arrival"] > clock]
+
         if ready_queue:
-            ready_queue.sort(key=lambda x: x["duration"])  # menor duração
+            ready_queue.sort(key=lambda x: x["duration"])
             p = ready_queue.pop(0)
             start = max(clock, p["arrival"])
             end = start + p["duration"]
@@ -67,6 +61,7 @@ def sjf_non_preemptive_scheduler(processes):
             clock = end
         else:
             clock += 1
+
     return completed
 
 
@@ -75,7 +70,6 @@ def sjf_preemptive_scheduler(processes):
     clock = 0
     completed = []
     processes = sorted(processes, key=lambda x: x["arrival"])
-    n = len(processes)
     remaining = {p["name"]: p["duration"] for p in processes}
     last_proc = None
     timeline = []
@@ -105,14 +99,14 @@ def sjf_preemptive_scheduler(processes):
     return [t for t in timeline if t["name"] != "Idle"]
 
 
+# ========== GANTT ==========
 def plot_gantt_comparativo(gantts_dict, title_prefix, output_file):
     fig, axs = plt.subplots(nrows=3, figsize=(12, 6), sharex=True)
     colors = cm.get_cmap("tab20", 20)
 
     for i, (algoritmo, gantt) in enumerate(gantts_dict.items()):
-        process_names = list({task["name"] for task in gantt})
-        process_names.sort()
-        name_to_y = {name: i for i, name in enumerate(process_names)}
+        process_names = sorted(set(t["name"] for t in gantt))
+        name_to_y = {name: j for j, name in enumerate(process_names)}
         name_to_color = {name: colors(j) for j, name in enumerate(process_names)}
 
         for task in gantt:
@@ -125,11 +119,11 @@ def plot_gantt_comparativo(gantts_dict, title_prefix, output_file):
                 color=name_to_color[task["name"]],
             )
         axs[i].set_yticks(list(name_to_y.values()))
-        axs[i].set_yticklabels(list(name_to_y.keys()))
+        axs[i].set_yticklabels(process_names)
         axs[i].set_ylabel(algoritmo)
         axs[i].grid(True, axis="x", linestyle="--", alpha=0.3)
 
-    max_time = max(task["end"] for gantt in gantts_dict.values() for task in gantt)
+    max_time = max(t["end"] for gantt in gantts_dict.values() for t in gantt)
     axs[-1].set_xticks(range(0, max_time + 1))
     axs[-1].set_xlabel("Tempo")
     fig.suptitle(f"{title_prefix} - Comparativo de Algoritmos", fontsize=14)
@@ -141,13 +135,12 @@ def plot_gantt_comparativo(gantts_dict, title_prefix, output_file):
 # ========== EXECUÇÃO ==========
 def executar_todos(input_dir="entradas", output_dir="resultados"):
     os.makedirs(output_dir, exist_ok=True)
-    arquivos = sorted([f for f in os.listdir(input_dir) if f.endswith(".txt")])
+    arquivos = sorted(f for f in os.listdir(input_dir) if f.endswith(".txt"))
 
     for arquivo in arquivos:
         entrada_path = os.path.join(input_dir, arquivo)
         nome_base = os.path.splitext(arquivo)[0]
         processos, quantum = parse_input(entrada_path)
-        print(f"\nArquivo: {arquivo} | Quantum: {quantum}")
 
         gantts_dict = {
             "FCFS": fcfs_scheduler([p.copy() for p in processos]),
@@ -157,9 +150,9 @@ def executar_todos(input_dir="entradas", output_dir="resultados"):
             "SJF Preemptivo": sjf_preemptive_scheduler([p.copy() for p in processos]),
         }
 
-        saida = os.path.join(output_dir, f"{nome_base}_comparativo.png")
-        plot_gantt_comparativo(gantts_dict, nome_base.upper(), saida)
-        print(f"  → Gráfico comparativo salvo em: {saida}")
+        output_path = os.path.join(output_dir, f"{nome_base}_comparativo_p1.png")
+        plot_gantt_comparativo(gantts_dict, nome_base.upper(), output_path)
+        print(f"→ Gráfico gerado: {output_path}")
 
 
 if __name__ == "__main__":
