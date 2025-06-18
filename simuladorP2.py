@@ -1,15 +1,11 @@
-# simulador_p2.py
-
 import os
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 
-# ========== PARSE DE ENTRADA ==========
 def parse_input(input_path):
-    with open(input_path, "r") as input_file:
-        lines = input_file.read().strip().split("\n")
-
+    with open(input_path) as f:
+        lines = f.read().strip().splitlines()
     n = int(lines[0])
     processes = []
     for line in lines[1 : n + 1]:
@@ -23,109 +19,102 @@ def parse_input(input_path):
                 "remaining": int(duration),
             }
         )
-
     quantum = int(lines[-1].split("=")[-1])
     return processes, quantum
 
 
-# ========== ROUND ROBIN ==========
 def round_robin_scheduler(processes, quantum):
     clock = 0
     queue = []
     timeline = []
     processes = sorted(processes, key=lambda p: p["arrival"])
-    waiting = processes.copy()
-
+    waiting = [p.copy() for p in processes]
     while waiting or queue:
         queue += [p for p in waiting if p["arrival"] <= clock]
         waiting = [p for p in waiting if p["arrival"] > clock]
-
         if queue:
             p = queue.pop(0)
-            slice_time = min(p["remaining"], quantum)
-            timeline.append(
-                {"name": p["name"], "start": clock, "end": clock + slice_time}
-            )
-            clock += slice_time
-            p["remaining"] -= slice_time
+            t = min(p["remaining"], quantum)
+            timeline.append({"name": p["name"], "start": clock, "end": clock + t})
+            clock += t
+            p["remaining"] -= t
+            queue += [p for p in waiting if p["arrival"] <= clock]
+            waiting = [p for p in waiting if p["arrival"] > clock]
             if p["remaining"] > 0:
-                queue += [p for p in waiting if p["arrival"] <= clock]
-                waiting = [p for p in waiting if p["arrival"] > clock]
                 queue.append(p)
         else:
             clock += 1
-
     return timeline
 
 
-# ========== PRIORITY ROUND ROBIN ==========
 def priority_rr_scheduler(processes, quantum):
     clock = 0
+    waiting = sorted([p.copy() for p in processes], key=lambda p: p["arrival"])
     queue = []
     timeline = []
-    processes = sorted(processes, key=lambda p: p["arrival"])
-    waiting = processes.copy()
-
     while waiting or queue:
-        queue += [p for p in waiting if p["arrival"] <= clock]
-        waiting = [p for p in waiting if p["arrival"] > clock]
-
+        while waiting and waiting[0]["arrival"] <= clock:
+            queue.append(waiting.pop(0))
         if queue:
-            queue.sort(key=lambda p: p["priority"])
-            current_priority = queue[0]["priority"]
-            same_priority = [p for p in queue if p["priority"] == current_priority]
-            p = same_priority.pop(0)
+            ready = sorted(queue, key=lambda p: p["priority"], reverse=True)
+            p = ready[0]
             queue.remove(p)
-
-            slice_time = min(p["remaining"], quantum)
-            timeline.append(
-                {"name": p["name"], "start": clock, "end": clock + slice_time}
-            )
-            clock += slice_time
-            p["remaining"] -= slice_time
-
-            queue += [proc for proc in waiting if proc["arrival"] <= clock]
-            waiting = [proc for proc in waiting if proc["arrival"] > clock]
-
+            future = [q["arrival"] for q in waiting if q["priority"] > p["priority"]]
+            t_int = min(future) if future else None
+            is_unique = all(q["priority"] < p["priority"] for q in queue)
+            if t_int is not None and t_int > clock and t_int - clock < quantum:
+                t = t_int - clock
+            else:
+                if t_int is None and is_unique:
+                    t = p["remaining"]
+                else:
+                    t = min(quantum, p["remaining"])
+            timeline.append({"name": p["name"], "start": clock, "end": clock + t})
+            clock += t
+            p["remaining"] -= t
+            while waiting and waiting[0]["arrival"] <= clock:
+                queue.append(waiting.pop(0))
             if p["remaining"] > 0:
                 queue.append(p)
         else:
             clock += 1
-
     return timeline
 
 
-# ========== MULTILEVEL QUEUE ==========
 def multilevel_queue_scheduler(processes):
     clock = 0
+    waiting = sorted([p.copy() for p in processes], key=lambda p: p["arrival"])
     queue = []
     timeline = []
-    processes = sorted(processes, key=lambda p: p["arrival"])
-    waiting = processes.copy()
-    quantum_map = {}  # nome → quantum (1, 2, 4, 8...)
+    quantum_map = {}
+    level_map = {}
+    base_q = 1
 
     while waiting or queue:
-        queue += [p for p in waiting if p["arrival"] <= clock]
-        waiting = [p for p in waiting if p["arrival"] > clock]
+        while waiting and waiting[0]["arrival"] <= clock:
+            p = waiting.pop(0)
+            quantum_map[p["name"]] = base_q
+            level_map[p["name"]] = 0
+            queue.append(p)
 
         if queue:
+            queue.sort(key=lambda p: level_map[p["name"]])
             p = queue.pop(0)
-            if p["name"] not in quantum_map:
-                quantum_map[p["name"]] = 1
+            q = quantum_map[p["name"]]
+            t = min(p["remaining"], q)
+            timeline.append({"name": p["name"], "start": clock, "end": clock + t})
+            clock += t
+            p["remaining"] -= t
 
-            qt = quantum_map[p["name"]]
-            slice_time = min(p["remaining"], qt)
-            timeline.append(
-                {"name": p["name"], "start": clock, "end": clock + slice_time}
-            )
-            clock += slice_time
-            p["remaining"] -= slice_time
-
-            queue += [proc for proc in waiting if proc["arrival"] <= clock]
-            waiting = [proc for proc in waiting if proc["arrival"] > clock]
+            while waiting and waiting[0]["arrival"] <= clock:
+                np = waiting.pop(0)
+                quantum_map[np["name"]] = base_q
+                level_map[np["name"]] = 0
+                queue.append(np)
 
             if p["remaining"] > 0:
-                quantum_map[p["name"]] *= 2
+                level_map[p["name"]] += 1
+                quantum_map[p["name"]] = base_q * (2 ** level_map[p["name"]])
                 queue.append(p)
         else:
             clock += 1
@@ -133,64 +122,52 @@ def multilevel_queue_scheduler(processes):
     return timeline
 
 
-# ========== GANTT ==========
-def plot_gantt_comparativo(gantts_dict, title_prefix, output_file):
-    fig, axs = plt.subplots(nrows=3, figsize=(12, 6), sharex=True)
+def plot_gantt_comparativo(gantts, output_file):
+    fig, axs = plt.subplots(nrows=3, figsize=(12, 9))
     colors = cm.get_cmap("tab20", 20)
-
-    for i, (algoritmo, gantt) in enumerate(gantts_dict.items()):
-        process_names = sorted(set(t["name"] for t in gantt))
-        name_to_y = {name: j for j, name in enumerate(process_names)}
-        name_to_color = {name: colors(j) for j, name in enumerate(process_names)}
-
-        for task in gantt:
-            y_pos = name_to_y[task["name"]]
-            axs[i].barh(
-                y_pos,
-                task["end"] - task["start"],
-                left=task["start"],
+    for ax, (name, gantt) in zip(axs, gantts.items()):
+        procs = sorted({t["name"] for t in gantt})
+        y_map = {n: i for i, n in enumerate(procs)}
+        c_map = {n: colors(i) for i, n in enumerate(procs)}
+        for t in gantt:
+            ax.barh(
+                y_map[t["name"]],
+                t["end"] - t["start"],
+                left=t["start"],
                 height=0.5,
-                color=name_to_color[task["name"]],
+                color=c_map[t["name"]],
             )
-        axs[i].set_yticks(list(name_to_y.values()))
-        axs[i].set_yticklabels(process_names)
-        axs[i].set_ylabel(algoritmo)
-        axs[i].grid(True, axis="x", linestyle="--", alpha=0.3)
-
-    max_time = max(t["end"] for gantt in gantts_dict.values() for t in gantt)
-    axs[-1].set_xticks(range(0, max_time + 1))
-    axs[-1].set_xlabel("Tempo")
-    fig.suptitle(f"{title_prefix} - Algoritmos da Parte 2", fontsize=14)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+        ax.set_yticks(list(y_map.values()))
+        ax.set_yticklabels(procs)
+        ax.set_xlabel("Tempo")
+        ax.set_title(name)
+        ax.grid(True, axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
     plt.savefig(output_file)
     plt.close()
 
 
-# ========== EXECUÇÃO ==========
 def executar_todos(input_dir="entradas", output_dir="resultados"):
     os.makedirs(output_dir, exist_ok=True)
-    arquivos = sorted(f for f in os.listdir(input_dir) if f.endswith(".txt"))
-
-    for arquivo in arquivos:
-        entrada_path = os.path.join(input_dir, arquivo)
-        nome_base = os.path.splitext(arquivo)[0]
-        processos, quantum = parse_input(entrada_path)
-
-        gantts_dict = {
-            "Round-Robin": round_robin_scheduler(
+    for f in sorted(os.listdir(input_dir)):
+        if not f.endswith(".txt"):
+            continue
+        path = os.path.join(input_dir, f)
+        processos, quantum = parse_input(path)
+        gantts = {
+            "Round Robin Scheduling": round_robin_scheduler(
                 [p.copy() for p in processos], quantum
             ),
-            "Prioridade + RR": priority_rr_scheduler(
+            "Priority Scheduling": priority_rr_scheduler(
                 [p.copy() for p in processos], quantum
             ),
-            "Multilevel Queue": multilevel_queue_scheduler(
+            "Multilevel Queue Scheduling": multilevel_queue_scheduler(
                 [p.copy() for p in processos]
             ),
         }
-
-        output_path = os.path.join(output_dir, f"{nome_base}_comparativo_p2.png")
-        plot_gantt_comparativo(gantts_dict, nome_base.upper(), output_path)
-        print(f"→ Gráfico gerado: {output_path}")
+        out = os.path.join(output_dir, f"{os.path.splitext(f)[0]}_comparativo_p2.png")
+        plot_gantt_comparativo(gantts, out)
+        print(f"Gráfico gerado: {out}")
 
 
 if __name__ == "__main__":
