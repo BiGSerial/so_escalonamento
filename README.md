@@ -32,13 +32,13 @@ Quantum=<valor>
 
 
 ### Exemplo:
-
+```
 3
 A 0 6 1
 B 2 3 2
 C 4 1 1
 Quantum=2
-
+```
 
 ## Como Executar
 
